@@ -1,0 +1,11 @@
+torch>=2.1
+transformers>=4.40
+tokenizers
+scikit-learn
+scipy
+numpy
+ijson
+sentence-transformers
+nltk
+matplotlib
+networkx
