@@ -1,5 +1,5 @@
 """
-Filter incomplete papers and create train/val/test splits.
+Step 2 — Filter incomplete papers and create train/val/test splits.
 
 The paper removed entries with incomplete information, then took 1000 papers
 for validation and 1000 for test (Table I: 31,726 / 1,000 / 1,000).

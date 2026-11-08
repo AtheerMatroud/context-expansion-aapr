@@ -1,5 +1,5 @@
 """
-Stream the raw AAPR dataset (Yang et al. 2018) and produce a compact,
+Step 1 — Stream the raw AAPR dataset (Yang et al. 2018) and produce a compact,
 readable JSONL with one record per paper.
 
 Fields written per paper:

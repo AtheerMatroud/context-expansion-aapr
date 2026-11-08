@@ -18,7 +18,7 @@ Writes runs/stats_<slug>.md and prints it.
 import argparse, glob, json, os, re
 import numpy as np
 from scipy import stats
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_score, recall_score
 
 
 def load(pattern):
@@ -39,6 +39,15 @@ def mean_sd(v):
 def metrics(y, p):
     pred = (p >= 0.5).astype(int)
     return {"acc": accuracy_score(y, pred), "f1": f1_score(y, pred), "auc": roc_auc_score(y, p)}
+
+
+def metrics_full(y, p):
+    """Accuracy, positive-class F1, macro-F1, per-class precision and recall, AUC."""
+    pred = (p >= 0.5).astype(int)
+    return {"acc": accuracy_score(y, pred), "f1": f1_score(y, pred), "macro_f1": f1_score(y, pred, average="macro"),
+            "prec_pos": precision_score(y, pred, zero_division=0), "rec_pos": recall_score(y, pred, zero_division=0),
+            "prec_neg": precision_score(1 - y, 1 - pred, zero_division=0), "rec_neg": recall_score(1 - y, 1 - pred, zero_division=0),
+            "auc": roc_auc_score(y, p)}
 
 
 def mcnemar_exact(b, c):
@@ -92,7 +101,32 @@ def main():
             t = r["test"]
             lines.append(f"| {nm} | {r['seed']} | {100*t['acc']:.1f} | {100*t['f1']:.1f} | {100*t['auc']:.1f} |")
     lines.append("")
-    lines.append("## Mean +/- SD over seeds and Welch's t-test (independent, n = #seeds)")
+    lines.append("## Individual runs: per-run metrics incl. macro-F1 and per-class precision / recall")
+    lines.append("| configuration | seed | acc | F1+ | macro-F1 | P+ | R+ | P- | R- | AUC |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|")
+    for nm, runs in ((args.name_a, A), (args.name_b, B)):
+        for r in runs:
+            m = metrics_full(r["y"], r["p"])
+            lines.append(f"| {nm} | {r['seed']} | {100*m['acc']:.1f} | {100*m['f1']:.1f} | {100*m['macro_f1']:.1f} | {100*m['prec_pos']:.1f} | {100*m['rec_pos']:.1f} | {100*m['prec_neg']:.1f} | {100*m['rec_neg']:.1f} | {100*m['auc']:.1f} |")
+    lines.append("")
+    # matched seeds: paired per-seed differences (variation across training runs)
+    sa = {r["seed"]: r for r in A}; sb = {r["seed"]: r for r in B}
+    common = sorted(set(sa) & set(sb))
+    paired = {}
+    if common:
+        lines.append(f"## Individual runs, matched seeds {common}: paired per-seed differences (B - A), mean +/- SD across runs")
+        lines.append("| metric | per-seed differences | mean | SD | min | max | p (paired t, secondary) |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for k in ("acc", "f1", "macro_f1", "auc"):
+            d = [100 * (metrics_full(sb[s]["y"], sb[s]["p"])[k] - metrics_full(sa[s]["y"], sa[s]["p"])[k]) for s in common]
+            m, sd = mean_sd(d)
+            p = stats.ttest_1samp(d, 0.0).pvalue if len(d) > 1 else float("nan")
+            paired[k] = {"diffs": d, "mean": m, "sd": sd, "p": p}
+            lines.append(f"| {k} | {', '.join(f'{x:+.1f}' for x in d)} | {m:+.2f} | {sd:.2f} | {min(d):+.1f} | {max(d):+.1f} | {p:.3f} |")
+        lines.append("")
+        lines.append("Note: the SD across seeds describes variation between training runs on the same test papers; the paired tests of the next section describe uncertainty from sampling the test papers for the seed-averaged ensemble. They are different quantities.")
+        lines.append("")
+    lines.append("## Mean +/- SD over seeds and Welch's t-test (independent, n = #seeds; secondary)")
     lines.append("| metric | " + args.name_a + " | " + args.name_b + " | diff (B-A) | t | p (Welch) |")
     lines.append("|---|---|---|---|---|---|")
     for k in ("acc", "f1", "auc"):
@@ -124,11 +158,24 @@ def main():
     for k in ("acc", "f1", "auc"):
         m, lo, hi, p = boot[k]
         lines.append(f"| {k.upper()} | {100*m:+.2f} | [{100*lo:+.2f}, {100*hi:+.2f}] | {p:.4f} |")
+    lines.append("")
+    mfa, mfb = metrics_full(y, pa), metrics_full(y, pb)
+    lines.append(f"Ensemble sizes: {args.name_a} {len(A)} models, {args.name_b} {len(B)} models" + ("" if len(A) == len(B) else "  (UNEQUAL: use matching globs for confirmatory comparisons)"))
+    lines.append(f"Ensemble macro-F1: {100*mfa['macro_f1']:.1f} vs {100*mfb['macro_f1']:.1f}; P+/R+ {100*mfa['prec_pos']:.1f}/{100*mfa['rec_pos']:.1f} vs {100*mfb['prec_pos']:.1f}/{100*mfb['rec_pos']:.1f}; P-/R- {100*mfa['prec_neg']:.1f}/{100*mfa['rec_neg']:.1f} vs {100*mfb['prec_neg']:.1f}/{100*mfb['rec_neg']:.1f}")
     txt = "\n".join(lines)
     slug = re.sub(r"[^a-z0-9]+", "_", (args.name_a + "_vs_" + args.name_b).lower()).strip("_")
     os.makedirs(args.out, exist_ok=True)
     with open(os.path.join(args.out, f"stats_{slug}.md"), "w", encoding="utf-8") as f:
         f.write(txt + "\n")
+    # machine-readable summary for stats_family.py (Holm adjustment over a family of comparisons)
+    summary = {"name_a": args.name_a, "name_b": args.name_b, "seeds_a": [r["seed"] for r in A], "seeds_b": [r["seed"] for r in B],
+               "n_a": len(A), "n_b": len(B), "matched_seeds": common, "paired_runs": paired,
+               "ensemble": {"a": mfa, "b": mfb, "mcnemar_b": b_, "mcnemar_c": c_, "mcnemar_p": p_mc,
+                            "boot": {k: {"diff": v[0], "lo": v[1], "hi": v[2], "p": v[3]} for k, v in boot.items()}},
+               "welch": {k: {"mean_a": mean_sd([100*r["test"][k] for r in A])[0], "mean_b": mean_sd([100*r["test"][k] for r in B])[0],
+                             "p": (stats.ttest_ind([100*r["test"][k] for r in B], [100*r["test"][k] for r in A], equal_var=False).pvalue if len(A) > 1 and len(B) > 1 else None)} for k in ("acc", "f1", "auc")}}
+    with open(os.path.join(args.out, f"stats_{slug}.json"), "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=1)
     print(txt)
 
 

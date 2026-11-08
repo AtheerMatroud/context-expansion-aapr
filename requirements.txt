@@ -5,7 +5,4 @@ scikit-learn
 scipy
 numpy
 ijson
-sentence-transformers
-nltk
-matplotlib
-networkx
+sentence-transformers   # optional: --backend st for enhance/novelty.py

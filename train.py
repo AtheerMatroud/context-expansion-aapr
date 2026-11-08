@@ -1,5 +1,5 @@
 """
-Train and evaluate the BERT classifier (with or without the MoCo branch of LMCBert) on a summary variant.
+Step 4 — Train / evaluate LMCBert and its ablations & baselines.
 
 Paper hyper-parameters (Sec. IV-B): batch 32, 80 epochs, lr 2e-5, 5000 warmup
 steps, Adam, tau 0.07, queue 4096, momentum 0.99, lambda by grid search.
